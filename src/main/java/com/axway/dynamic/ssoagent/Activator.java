@@ -12,13 +12,16 @@ import static org.osgi.service.http.whiteboard.HttpWhiteboardConstants.HTTP_WHIT
 
 public class Activator implements BundleActivator {
     private static final Logger LOGGER = LoggerFactory.getLogger(Activator.class);
-    private ServiceRegistration<Filter> registration;
     private static final String SCRIPT = "com.axway.dynamic.ssoagent.script";
 
+    private ServiceRegistration<Filter> registration;
+
     @Override
-    public void start(BundleContext context) throws Exception {    
+    public void start(BundleContext context) throws Exception {
         Filter authenticationFilter = createAuthenticationFilter(context);
-        registerAuthenticationFilter(context, authenticationFilter);
+        if (authenticationFilter != null) {
+            registerAuthenticationFilter(context, authenticationFilter);
+        }
     }
 
     @Override
@@ -27,7 +30,13 @@ public class Activator implements BundleActivator {
     }
 
     private Filter createAuthenticationFilter(BundleContext context) throws Exception {
-        return new SSOAgentFilter(context.getProperty(SCRIPT));
+        String scriptFileName = context.getProperty(SCRIPT);
+        if (scriptFileName == null) {
+            LOGGER.warn("Property {} has not be specified. DynamicSSO filter won't be installed", SCRIPT);
+            return null;
+        } else {
+            return new SSOAgentFilter(scriptFileName);
+        }
     }
 
     private void registerAuthenticationFilter(BundleContext context, Filter authenticationFilter) {

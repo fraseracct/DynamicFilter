@@ -1,57 +1,55 @@
 package com.axway.dynamic.ssoagent;
 
-import groovy.util.ResourceException;
 import java.io.*;
 import java.security.Principal;
 import java.util.*;
-import java.util.logging.Level;
-
 import javax.servlet.*;
 import javax.servlet.http.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import groovy.lang.Binding;
+import groovy.util.GroovyScriptEngine;
+import groovy.util.ResourceException;
+import groovy.util.ScriptException;
 
 public class SSOAgentFilter implements Filter {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SSOAgentFilter.class);
 
-    private final File script;
-    private final groovy.util.GroovyScriptEngine engine;
+    private final String scriptName;
+    private final GroovyScriptEngine engine;
 
-    public SSOAgentFilter(String script) throws IOException {
-        
-        this.script = new File(script);
-        if (this.script == null || !this.script.isFile() || !this.script.canRead()) {
-            throw new IOException("Groovy script file '" + script + "' did not construct a valid java File instance");
+    SSOAgentFilter(String scriptFileName) throws IOException {
+        File script = new File(scriptFileName);
+        if (!script.isFile() || !script.canRead()) {
+            throw new IOException("Groovy script file '" + scriptFileName + "' did not construct a valid java File instance");
         }
-        String roots[] = new String[] {
-          this.script.getAbsolutePath()
-        };
-        engine = new groovy.util.GroovyScriptEngine(roots);
+        scriptName = script.getName();
+        engine = new GroovyScriptEngine(script.getAbsolutePath());
     }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         HttpServletRequest httpRequest = (HttpServletRequest) request;
 
-        Set<String> adiRoles = new HashSet<String>();
         String username = "";
-                
-        groovy.lang.Binding binding = new groovy.lang.Binding();
+        Set<String> roles = new HashSet<>();
+
+        Binding binding = new Binding();
         binding.setProperty("request", request);
         binding.setProperty("response", response);
-        binding.setProperty("chain", chain);
         binding.setProperty("username", username);
-        binding.setProperty("adiRoles", adiRoles);
-        
-        try {
-            engine.run(script.getName(), binding);
-            adiRoles = (Set<String>) binding.getProperty("adiRoles");
-            username = (String) binding.getProperty("username");
+        binding.setProperty("roles", roles);
 
-            request = new AuthenticatedHttpServletRequestWrapper(httpRequest, username, adiRoles);
-        } catch (ResourceException ex) {
-            java.util.logging.Logger.getLogger(SSOAgentFilter.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (groovy.util.ScriptException ex) {
-            java.util.logging.Logger.getLogger(SSOAgentFilter.class.getName()).log(Level.SEVERE, null, ex);
+        try {
+            engine.run(scriptName, binding);
+        } catch (ResourceException | ScriptException e) {
+            LOGGER.warn("Error occurred when executing script", e);
         }
-        
+
+        username = (String) binding.getProperty("username");
+        roles = (Set<String>) binding.getProperty("roles");
+        request = new AuthenticatedHttpServletRequestWrapper(httpRequest, username, roles);
+
         chain.doFilter(request, response);
     }
 
@@ -66,11 +64,10 @@ public class SSOAgentFilter implements Filter {
     }
 
     private static class AuthenticatedHttpServletRequestWrapper extends HttpServletRequestWrapper {
-
         private final Principal principal;
         private final Set<String> roles;
 
-        public AuthenticatedHttpServletRequestWrapper(HttpServletRequest request, String username, Set<String> roles) {
+        private AuthenticatedHttpServletRequestWrapper(HttpServletRequest request, String username, Set<String> roles) {
             super(request);
             principal = new PrincipalImpl(username);
             this.roles = roles;
@@ -88,7 +85,6 @@ public class SSOAgentFilter implements Filter {
     }
 
     private static class PrincipalImpl implements Principal {
-
         private final String name;
 
         private PrincipalImpl(String name) {
